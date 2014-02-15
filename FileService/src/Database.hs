@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE RecordWildCards #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Database
@@ -30,7 +29,7 @@ module Database (
 import qualified Data.Map as M
 import           Data.Map (Map, fromList)
 import           Data.SafeCopy (deriveSafeCopy, base)
-import           Data.Acid (AcidState, Update, Query, openLocalStateFrom, makeAcidic)
+import           Data.Acid (AcidState, Update, Query, makeAcidic)
 import           Data.Typeable (Typeable)
 import           Control.Monad.Reader (ask)
 import           Control.Monad.State (get, put)

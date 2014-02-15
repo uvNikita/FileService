@@ -25,13 +25,11 @@ import qualified Data.Map as Map
 import qualified Database as DB
 import           Data.List.Split (splitOn)
 import           Data.Acid (openLocalStateFrom, closeAcidState, query)
-import           Control.Monad.State
+import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 
 
 type Action a = StateT DB.ST IO a
 type Command = [String] -> Action ()
-
-data StatusCode = OK | EXIT
 
 io :: IO a -> Action a
 io = liftIO
@@ -51,7 +49,7 @@ printUser :: Command
 printUser [] = get >>= (io . putStrLn . DB.userName . DB.currUser)
 
 readInput :: Action (String, [String])
-readInput = (io getLine) >>= return . parseLine
+readInput = io getLine >>= return . parseLine
 
 parseLine :: String -> (String, [String])
 parseLine line = (command, args)

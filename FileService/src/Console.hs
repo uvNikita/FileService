@@ -24,7 +24,7 @@ module Console (
 import qualified Data.Map as Map
 import qualified Database as DB
 import           Data.List.Split (splitOn)
-import           Data.Acid (openLocalStateFrom, closeAcidState, query)
+import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 
 
@@ -35,7 +35,11 @@ io :: IO a -> Action a
 io = liftIO
 
 commands :: Map.Map String Command
-commands = Map.fromList [("login", login), ("pu", printUser)]
+commands = Map.fromList [
+      ("login", login)
+    , ("pu", printUser)
+    , ("adduser", addUser)
+    ]
 
 login :: Command
 login [username] = do
@@ -45,8 +49,14 @@ login [username] = do
         Nothing -> excFail ["Invalid user: " ++ username]
         Just user -> get >>= (\ st -> put $ st {DB.currUser = user})
 
+addUser :: Command
+addUser [username] = do
+    users <- liftM DB.users get
+    let user = DB.User username
+    io $ update users (DB.AddUser user)
+
 printUser :: Command
-printUser [] = get >>= (io . putStrLn . DB.userName . DB.currUser)
+printUser [] = get >>= (io . putStrLn . DB.username . DB.currUser)
 
 readInput :: Action (String, [String])
 readInput = io getLine >>= return . parseLine

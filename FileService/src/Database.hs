@@ -16,13 +16,13 @@
 -----------------------------------------------------------------------------
 
 module Database (
-      User
+      User (..)
     , ST (..)
     , getUser
-    , userName
     , initState
     , initUsers
     , GetUser (..)
+    , AddUser (..)
 ) where
 
 
@@ -35,7 +35,7 @@ import           Control.Monad.Reader (ask)
 import           Control.Monad.State (get, put)
 
 data User = User {
-    userName :: String
+    username :: String
 } deriving (Show, Typeable)
 
 data Users = Users (Map String User)
@@ -51,7 +51,7 @@ data ST = ST {
 addUser :: User -> Update Users ()
 addUser user
     = do Users users <- get
-         put $ Users $ M.insert (userName user) user users
+         put $ Users $ M.insert (username user) user users
 
 getUser :: String -> Query Users (Maybe User)
 getUser username

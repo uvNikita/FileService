@@ -12,13 +12,13 @@
 --
 -----------------------------------------------------------------------------
 import Console
+import Control.Monad (unless)
 
 loop = do
     (cName, args) <- readInput
-    if cName == "exit"
-        then return ()
-        else do excCommand cName args
-                loop
+    unless (cName == "exit") $
+        do excCommand cName args
+           loop
 
 code = do
     connectDB

@@ -63,11 +63,13 @@ getUser username
 
 $(makeAcidic ''Users ['addUser, 'getUser])
 
-root = User "root" "pass"
+root = User "root" "rpass"
 
-initUsers = Users $ fromList [("root", root)]
+guest = User "guest" "pass"
+
+initUsers = Users $ fromList [("root", root), ("guest", guest)]
 
 initState = ST {
       users = error "No db connection."
-    , currUser = root
+    , currUser = guest
 }

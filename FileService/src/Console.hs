@@ -31,45 +31,66 @@ import           Crypto.PasswordStore (makePassword, verifyPassword)
 
 
 type Action a = StateT DB.ST IO a
-type Command = [String] -> Action ()
+type Args = [String]
+
+data Command = Command {
+      comName :: String
+    , comAction :: Args -> Action ()
+    , argsNum :: Int
+    , usage :: String
+}
+
+exc :: Command -> Args -> Action ()
+exc command args = if length args == argsNum command
+                   then (comAction command) args
+                   else raise $ "Usage: " ++ usage command
 
 io :: IO a -> Action a
 io = liftIO
 
 commands :: Map.Map String Command
-commands = Map.fromList [
-      ("login", login)
-    , ("pu", printUser)
-    , ("adduser", addUser)
-    ]
+commands = Map.fromList $ map (\ c -> (comName c, c)) cs
+           where cs = [login, printUser, addUser]
 
-login :: Command
-login [username, password] = do
-    users <- liftM DB.users get
-    user <- io $ query users (DB.GetUser username)
-    let pass = B.pack password
-    case user of
-        Nothing -> excFail ["Invalid username or password."]
-        Just user -> if verifyPassword pass $ DB.passHash user
-                    then get >>= (\ st -> put $ st {DB.currUser = user})
-                    else excFail ["Invalid username or password"]
+login = Command {
+      comName = "login"
+    , comAction = \ [username, password] -> do
+          users <- liftM DB.users get
+          user <- io $ query users (DB.GetUser username)
+          let pass = B.pack password
+          case user of
+              Nothing -> raise "Invalid username or password."
+              Just user -> if verifyPassword pass $ DB.passHash user
+                          then get >>= (\ st -> put $ st {DB.currUser = user})
+                          else raise "Invalid username or password"
+    , argsNum = 2
+    , usage = "login username password"
 
-addUser :: Command
-addUser [username, password] = do
-    users <- liftM DB.users get
-    let pass = B.pack password
-    passHash <- io $ makePassword pass 14
-    let user = DB.User username passHash
-    dbUser <- io $ query users (DB.GetUser username)
-    let addUser = io $ update users (DB.AddUser user)
-    maybe (addUser) (\ _ -> excFail ["User exists."]) dbUser
+}
 
+addUser = Command {
+      comName = "adduser"
+    , comAction = \ [username, password] -> do
+          users <- liftM DB.users get
+          let pass = B.pack password
+          passHash <- io $ makePassword pass 14
+          let user = DB.User username passHash
+          dbUser <- io $ query users (DB.GetUser username)
+          let addUser = io $ update users (DB.AddUser user)
+          maybe addUser (\ _ -> raise "User exists.") dbUser
+    , argsNum = 2
+    , usage = "addUser username password"
+}
 
-printUser :: Command
-printUser [] = get >>= (io . putStrLn . DB.username . DB.currUser)
+printUser = Command {
+      comName = "pu"
+    , comAction = \ [] -> get >>= (io . putStrLn . DB.username . DB.currUser)
+    , argsNum = 0
+    , usage = "pu"
+}
 
 readInput :: Action (String, [String])
-readInput = io getLine >>= return . parseLine
+readInput = liftM parseLine (io getLine)
 
 parseLine :: String -> (String, [String])
 parseLine line = (command, args)
@@ -77,13 +98,12 @@ parseLine line = (command, args)
 
 excCommand :: String -> [String] -> Action ()
 excCommand cName args =
-    maybe (excFail ["No such command: " ++ cName]) (\ com -> com args) (getCommand cName)
+    maybe (raise $ "No such command: " ++ cName) (`exc` args) (getCommand cName)
 
 getCommand :: String -> Maybe Command
 getCommand name = Map.lookup name commands
 
-excFail :: Command
-excFail [msg] = io $ putStrLn msg
+raise msg = io $ putStrLn msg
 
 connectDB :: Action ()
 connectDB = do

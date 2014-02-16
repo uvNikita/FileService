@@ -42,6 +42,7 @@ import           Control.Monad.Reader (ask)
 import           Control.Monad.State (get, put)
 import           System.IO.Unsafe (unsafePerformIO)
 import           Crypto.PasswordStore (makePassword)
+import           Data.Time.Clock (DiffTime)
 
 data User = User {
       username :: String
@@ -106,4 +107,5 @@ data ST = ST {
       currUser :: User
     , users :: AcidState Users
     , files :: AcidState Files
+    , valTime :: DiffTime
 }

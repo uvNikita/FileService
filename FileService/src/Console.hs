@@ -54,7 +54,7 @@ io = liftIO
 
 commands :: Map.Map String Command
 commands = Map.fromList $ map (\ c -> (comName c, c)) cs
-           where cs = [login, printUser, addUser, addFile, listFiles, timeLeft]
+           where cs = [login, printUser, addUser, addFile, listFiles, timeLeft, cat]
 
 login = Command {
       comName = "login"
@@ -117,13 +117,25 @@ listFiles = Command {
     , usage = "ls"
 }
 
+cat = Command {
+      comName = "cat"
+    , comAction = \ [filename] -> do
+        filesDB <- liftM DB.files get
+        file <- io $ query filesDB (DB.GetFile filename)
+        maybe (raise $ "No such file: " ++ filename)
+              (\ f -> io $ putStrLn $ DB.filedata f)
+              file
+    , argsNum = 1
+    , usage = "cat filename"
+}
+
 timeLeft = Command {
       comName = "tl"
     , comAction = \ [] -> do
           currTime <- io timestamp
           valTime <- liftM DB.valTime get
           let tl = 60 - (currTime - valTime)
-          io $ putStrLn $ show tl
+          io $ print tl
     , argsNum = 0
     , usage = "tl"
 }
@@ -166,7 +178,7 @@ updateValTime = do
 askQuestion = do
     x1 <- io $ randomRIO (1, 10)
     x2 <- io $ randomRIO (1, 10)
-    io $ putStrLn $ (show x1) ++ " + " ++ (show x2) ++ " = "
+    io $ putStrLn $ show x1 ++ " + " ++ show x2 ++ " = "
     res <- io $ liftM maybeRead getLine
     return $ validateCalc x1 x2 res
 

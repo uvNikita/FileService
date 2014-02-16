@@ -12,11 +12,11 @@
 --
 -----------------------------------------------------------------------------
 import Console
-import Control.Monad (unless, when)
+import Control.Monad (unless)
 
 loop = do
     isValid <- checkAuth
-    when (not isValid) $ do
+    unless isValid $ do
         raise "Not valid user."
         loop
     (cName, args) <- readInput

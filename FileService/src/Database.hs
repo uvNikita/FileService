@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Database
@@ -27,6 +28,7 @@ module Database (
 
 
 import qualified Data.Map as M
+import           Data.ByteString (ByteString)
 import           Data.Map (Map, fromList)
 import           Data.SafeCopy (deriveSafeCopy, base)
 import           Data.Acid (AcidState, Update, Query, makeAcidic)
@@ -35,7 +37,8 @@ import           Control.Monad.Reader (ask)
 import           Control.Monad.State (get, put)
 
 data User = User {
-    username :: String
+      username :: String
+    , passHash :: ByteString
 } deriving (Show, Typeable)
 
 data Users = Users (Map String User)
@@ -60,7 +63,7 @@ getUser username
 
 $(makeAcidic ''Users ['addUser, 'getUser])
 
-root = User "root"
+root = User "root" "pass"
 
 initUsers = Users $ fromList [("root", root)]
 

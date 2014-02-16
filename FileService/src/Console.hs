@@ -23,9 +23,11 @@ module Console (
 
 import qualified Data.Map as Map
 import qualified Database as DB
+import qualified Data.ByteString.Char8 as B
 import           Data.List.Split (splitOn)
 import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
+import           Crypto.PasswordStore (makePassword, verifyPassword)
 
 
 type Action a = StateT DB.ST IO a
@@ -42,18 +44,26 @@ commands = Map.fromList [
     ]
 
 login :: Command
-login [username] = do
+login [username, password] = do
     users <- liftM DB.users get
     user <- io $ query users (DB.GetUser username)
+    let pass = B.pack password
     case user of
-        Nothing -> excFail ["Invalid user: " ++ username]
-        Just user -> get >>= (\ st -> put $ st {DB.currUser = user})
+        Nothing -> excFail ["Invalid username or password."]
+        Just user -> if verifyPassword pass $ DB.passHash user
+                    then get >>= (\ st -> put $ st {DB.currUser = user})
+                    else excFail ["Invalid username or password"]
 
 addUser :: Command
-addUser [username] = do
+addUser [username, password] = do
     users <- liftM DB.users get
-    let user = DB.User username
-    io $ update users (DB.AddUser user)
+    let pass = B.pack password
+    passHash <- io $ makePassword pass 14
+    let user = DB.User username passHash
+    dbUser <- io $ query users (DB.GetUser username)
+    let addUser = io $ update users (DB.AddUser user)
+    maybe (addUser) (\ _ -> excFail ["User exists."]) dbUser
+
 
 printUser :: Command
 printUser [] = get >>= (io . putStrLn . DB.username . DB.currUser)

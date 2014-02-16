@@ -9,7 +9,8 @@ data-dir: ""
  
 executable FileService
     build-depends: QuickCheck -any, acid-state -any, base -any,
-                   containers -any, mtl -any, safecopy -any, split -any
+                   bytestring -any, containers -any, mtl -any,
+                   pwstore-purehaskell -any, safecopy -any, split -any
     main-is: Main.hs
     buildable: True
     hs-source-dirs: src
@@ -17,7 +18,8 @@ executable FileService
  
 test-suite test-FileService
     build-depends: QuickCheck -any, acid-state -any, base -any,
-                   containers -any, mtl -any, safecopy -any, split -any
+                   bytestring -any, containers -any, mtl -any,
+                   pwstore-purehaskell -any, safecopy -any, split -any
     type: exitcode-stdio-1.0
     main-is: Main.hs
     buildable: True

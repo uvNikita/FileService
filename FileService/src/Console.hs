@@ -16,8 +16,7 @@ module Console (
       run
     , excCommand
     , readInput
-    , connectDB
-    , disconnectDB
+    , raise
 ) where
 
 
@@ -28,7 +27,7 @@ import           Data.List.Split (splitOn)
 import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
-
+import           Control.Exception (finally)
 
 type Action a = StateT DB.ST IO a
 type Args = [String]
@@ -130,31 +129,14 @@ getCommand name = Map.lookup name commands
 
 raise msg = io $ putStrLn msg
 
-connectDB :: Action ()
-connectDB = do
-    connectUsers "/tmp/file_service/users"
-    connectFiles "/tmp/file_service/files"
-
-disconnectDB :: Action ()
-disconnectDB = do
-    let disconnect db = io $ closeAcidState db
-    files <- liftM DB.files get
-    users <- liftM DB.users get
-    disconnect files
-    disconnect users
-
-connectUsers :: String -> Action ()
-connectUsers path = do
-    users <- io $ openLocalStateFrom path DB.initUsers
-    state <- get
-    put $ state {DB.users = users}
-
-connectFiles :: String -> Action ()
-connectFiles path = do
-    files <- io $ openLocalStateFrom path DB.initFiles
-    state <- get
-    put $ state {DB.files = files}
-
 run code = do
-    runStateT (connectDB >> code >> disconnectDB) DB.initState
-    return ()
+    users <- openLocalStateFrom "/tmp/file_service/users" DB.initUsers
+    files <- openLocalStateFrom "/tmp/file_service/files" DB.initFiles
+    let initState = DB.ST {
+          DB.currUser = DB.guest
+        , DB.users = users
+        , DB.files = files
+    }
+    finally (runStateT code initState) $ do
+        closeAcidState users
+        closeAcidState files

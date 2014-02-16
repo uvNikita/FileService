@@ -20,8 +20,8 @@ module Database (
       User (..)
     , File (..)
     , ST (..)
+    , guest
     , getUser
-    , initState
     , initUsers
     , initFiles
     , GetUser (..)
@@ -106,10 +106,4 @@ data ST = ST {
       currUser :: User
     , users :: AcidState Users
     , files :: AcidState Files
-}
-
-initState = ST {
-      currUser = guest
-    , users = error "No db connection."
-    , files = error "No db connection."
 }

@@ -42,24 +42,55 @@ import           System.Random (randomRIO)
 type Action a = StateT ST IO a
 type Args = [String]
 
+class Executable a where
+    excName :: a -> String
+    excArgsNum :: a -> Int
+    excUsage :: a -> String
+    performAction :: a ->  Args -> Action ()
+    exc :: a -> Args -> Action ()
+    exc e args = if length args == excArgsNum e
+                    then performAction e args
+                    else raise $ "Usage: " ++ excUsage e
+
 data Command = Command {
       comName :: String
     , comAction :: Args -> Action ()
-    , argsNum :: Int
-    , usage :: String
+    , comArgsNum :: Int
+    , comUsage :: String
 }
 
-exc :: Command -> Args -> Action ()
-exc command args = if length args == argsNum command
-                   then (comAction command) args
-                   else raise $ "Usage: " ++ usage command
+instance Executable Command where
+    excName = comName
+    excArgsNum = comArgsNum
+    excUsage = comUsage
+    performAction c args = (comAction c) args
+
+data FileCommand = FileCommand {
+      fcomName :: String
+    , fcomAction :: F.File -> Action ()
+    , fcomUsage :: String
+}
+
+instance Executable FileCommand where
+    excName = fcomName
+    excArgsNum c = 1 :: Int
+    excUsage = fcomUsage
+    performAction c [filename] = do
+        filesDB <- liftM S.files get
+        file <- io $ query filesDB (DB.GetFile filename)
+        maybe (raise $ "No such file: " ++ filename)
+              (\ f -> (fcomAction c) f)
+              file
 
 io :: IO a -> Action a
 io = liftIO
 
-commands :: Map.Map String Command
-commands = Map.fromList $ map (\ c -> (comName c, c)) cs
-           where cs = [login, printUser, addUser, addFile, listFiles, timeLeft, cat]
+toMap :: Executable a => [a] -> Map.Map String a
+toMap cs = Map.fromList (map (\ c -> (excName c, c)) cs)
+
+(commands, fcommands) = (toMap coms, toMap fcoms)
+                        where coms = [login, printUser, addUser, addFile, listFiles, timeLeft]
+                              fcoms = [cat]
 
 login = Command {
       comName = "login"
@@ -72,8 +103,8 @@ login = Command {
               Just user -> if verifyPassword pass $ U.passHash user
                           then get >>= (\ st -> put $ st {S.currUser = user})
                           else raise "Invalid username or password"
-    , argsNum = 2
-    , usage = "login username password"
+    , comArgsNum = 2
+    , comUsage = "login username password"
 
 }
 
@@ -87,15 +118,15 @@ addUser = Command {
           dbUser <- io $ query users (DB.GetUser username)
           let addUser = io $ update users (DB.AddUser user)
           maybe addUser (\ _ -> raise "User exists.") dbUser
-    , argsNum = 2
-    , usage = "addUser username password"
+    , comArgsNum = 2
+    , comUsage = "addUser username password"
 }
 
 printUser = Command {
       comName = "pu"
     , comAction = \ [] -> get >>= (io . putStrLn . U.username . S.currUser)
-    , argsNum = 0
-    , usage = "pu"
+    , comArgsNum = 0
+    , comUsage = "pu"
 }
 
 addFile = Command {
@@ -107,8 +138,8 @@ addFile = Command {
           let file = F.File fname owner fdata
           let addFile = io $ update files (DB.AddFile file)
           maybe addFile (\ _ -> raise "File exists.") dbFile
-     , argsNum = 2
-     , usage = "addfile filename myfiledata"
+     , comArgsNum = 2
+     , comUsage = "addfile filename myfiledata"
 }
 
 listFiles = Command {
@@ -118,20 +149,14 @@ listFiles = Command {
           files <- io $ query filesDB DB.GetFiles
           let f2str f = F.filename f ++ " : " ++ (U.username . F.fileowner) f
           io $ mapM_ (putStrLn . f2str) files
-    , argsNum = 0
-    , usage = "ls"
+    , comArgsNum = 0
+    , comUsage = "ls"
 }
 
-cat = Command {
-      comName = "cat"
-    , comAction = \ [filename] -> do
-        filesDB <- liftM S.files get
-        file <- io $ query filesDB (DB.GetFile filename)
-        maybe (raise $ "No such file: " ++ filename)
-              (\ f -> io $ putStrLn $ F.filedata f)
-              file
-    , argsNum = 1
-    , usage = "cat filename"
+cat = FileCommand {
+      fcomName = "cat"
+    , fcomAction = \ file -> io $ putStrLn $ F.filedata file
+    , fcomUsage = "cat filename"
 }
 
 timeLeft = Command {
@@ -141,8 +166,8 @@ timeLeft = Command {
           valTime <- liftM S.valTime get
           let tl = 60 - (currTime - valTime)
           io $ print tl
-    , argsNum = 0
-    , usage = "tl"
+    , comArgsNum = 0
+    , comUsage = "tl"
 }
 
 readInput :: Action (String, [String])
@@ -154,11 +179,11 @@ parseLine line = (command, args)
                  where command : args = filter (not . null) $ splitOn " " line
 
 excCommand :: String -> [String] -> Action ()
-excCommand cName args =
-    maybe (raise $ "No such command: " ++ cName) (`exc` args) (getCommand cName)
-
-getCommand :: String -> Maybe Command
-getCommand name = Map.lookup name commands
+excCommand cName args = do
+    let noCommand = raise $ "No such command: " ++ cName
+    case Map.lookup cName commands of
+        Just c -> exc c args
+        Nothing -> maybe noCommand (`exc` args) (Map.lookup cName fcommands)
 
 raise msg = io $ putStrLn msg
 

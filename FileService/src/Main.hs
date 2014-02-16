@@ -20,9 +20,4 @@ loop = do
         do excCommand cName args
            loop
 
-code = do
-    connectDB
-    loop
-    disconnectDB
-
-main = run code
+main = run loop

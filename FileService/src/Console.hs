@@ -50,7 +50,7 @@ io = liftIO
 
 commands :: Map.Map String Command
 commands = Map.fromList $ map (\ c -> (comName c, c)) cs
-           where cs = [login, printUser, addUser]
+           where cs = [login, printUser, addUser, addFile, listFiles]
 
 login = Command {
       comName = "login"
@@ -89,10 +89,35 @@ printUser = Command {
     , usage = "pu"
 }
 
+addFile = Command {
+      comName = "addfile"
+    , comAction = \ [fname, fdata] -> do
+          files <- liftM DB.files get
+          owner <- liftM DB.currUser get
+          dbFile <- io $ query files (DB.GetFile fname)
+          let file = DB.File fname owner fdata
+          let addFile = io $ update files (DB.AddFile file)
+          maybe addFile (\ _ -> raise "File exists.") dbFile
+     , argsNum = 2
+     , usage = "addfile filename myfiledata"
+}
+
+listFiles = Command {
+      comName = "ls"
+    , comAction = \ [] -> do
+          filesDB <- liftM DB.files get
+          files <- io $ query filesDB DB.GetFiles
+          let f2str f = DB.filename f ++ " : " ++ (DB.username . DB.fileowner) f
+          io $ mapM_ (putStrLn . f2str) files
+    , argsNum = 0
+    , usage = "ls"
+}
+
 readInput :: Action (String, [String])
 readInput = liftM parseLine (io getLine)
 
 parseLine :: String -> (String, [String])
+parseLine "" = ("", [""])
 parseLine line = (command, args)
                  where command : args = filter (not . null) $ splitOn " " line
 
@@ -108,15 +133,15 @@ raise msg = io $ putStrLn msg
 connectDB :: Action ()
 connectDB = do
     connectUsers "/tmp/file_service/users"
+    connectFiles "/tmp/file_service/files"
 
 disconnectDB :: Action ()
 disconnectDB = do
-    disconnectUsers
-
-disconnectUsers :: Action ()
-disconnectUsers = do
+    let disconnect db = io $ closeAcidState db
+    files <- liftM DB.files get
     users <- liftM DB.users get
-    io $ closeAcidState users
+    disconnect files
+    disconnect users
 
 connectUsers :: String -> Action ()
 connectUsers path = do
@@ -124,6 +149,12 @@ connectUsers path = do
     state <- get
     put $ state {DB.users = users}
 
+connectFiles :: String -> Action ()
+connectFiles path = do
+    files <- io $ openLocalStateFrom path DB.initFiles
+    state <- get
+    put $ state {DB.files = files}
+
 run code = do
-    runStateT code DB.initState
+    runStateT (connectDB >> code >> disconnectDB) DB.initState
     return ()

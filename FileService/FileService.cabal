@@ -4,7 +4,6 @@ cabal-version: >=1.2
 build-type: Simple
 license: AllRightsReserved
 license-file: ""
-description:  
 data-dir: ""
  
 executable FileService
@@ -15,7 +14,7 @@ executable FileService
     main-is: Main.hs
     buildable: True
     hs-source-dirs: src
-    other-modules: Console Database
+    other-modules: State User File Console Database
  
 test-suite test-FileService
     build-depends: QuickCheck -any, acid-state -any, base -any,

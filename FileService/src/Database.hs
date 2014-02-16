@@ -1,7 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Database
@@ -17,37 +16,31 @@
 -----------------------------------------------------------------------------
 
 module Database (
-      User (..)
-    , File (..)
-    , ST (..)
-    , guest
-    , getUser
-    , initUsers
-    , initFiles
+      DBUsers
+    , DBFiles
     , GetUser (..)
     , AddUser (..)
     , GetFile (..)
     , GetFiles (..)
     , AddFile (..)
+    , initFiles
+    , initUsers
 ) where
 
 
+import qualified File as F
+import           File (File)
+import qualified User as U
+import           User (User)
 import qualified Data.Map as M
-import           Data.ByteString (ByteString)
-import           Data.Map (Map, fromList)
+import           Data.Map (Map)
 import           Data.SafeCopy (deriveSafeCopy, base)
 import           Data.Acid (AcidState, Update, Query, makeAcidic)
-import           Data.Typeable (Typeable)
 import           Control.Monad.Reader (ask)
 import           Control.Monad.State (get, put)
-import           System.IO.Unsafe (unsafePerformIO)
-import           Crypto.PasswordStore (makePassword)
-import           Data.Time.Clock (DiffTime)
 
-data User = User {
-      username :: String
-    , passHash :: ByteString
-} deriving (Show, Typeable)
+
+data Files = Files [File]
 
 data Users = Users (Map String User)
 
@@ -57,7 +50,7 @@ $(deriveSafeCopy 0 'base ''Users)
 addUser :: User -> Update Users ()
 addUser user = do
     Users users <- get
-    put $ Users $ M.insert (username user) user users
+    put $ Users $ M.insert (U.username user) user users
 
 getUser :: String -> Query Users (Maybe User)
 getUser username = do
@@ -66,19 +59,7 @@ getUser username = do
 
 $(makeAcidic ''Users ['addUser, 'getUser])
 
-root = User "root" $ unsafePerformIO $ makePassword "rpass" 14
-
-guest = User "guest" $ unsafePerformIO $ makePassword "pass" 14
-
-initUsers = Users $ fromList [("root", root), ("guest", guest)]
-
-data File = File {
-      filename :: String
-    , fileowner :: User
-    , filedata :: String
-} deriving (Show, Typeable)
-
-data Files = Files [File]
+type DBUsers = AcidState Users
 
 $(deriveSafeCopy 0 'base ''File)
 $(deriveSafeCopy 0 'base ''Files)
@@ -96,16 +77,13 @@ getFiles = do
 getFile :: String -> Query Files (Maybe File)
 getFile fname = do
     Files files <- ask
-    let filesMap = map (\ f -> (filename f, f)) files
+    let filesMap = map (\ f -> (F.filename f, f)) files
     return $ lookup fname filesMap
 
 $(makeAcidic ''Files ['addFile, 'getFile, 'getFiles])
 
+type DBFiles = AcidState Files
+
 initFiles = Files []
 
-data ST = ST {
-      currUser :: User
-    , users :: AcidState Users
-    , files :: AcidState Files
-    , valTime :: DiffTime
-}
+initUsers = Users $ M.fromList [("root", U.root), ("guest", U.guest)]

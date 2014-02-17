@@ -32,6 +32,9 @@ data User = User {
     , passHash :: ByteString
 } deriving (Show, Typeable)
 
+instance Eq User where
+    User n1 _ == User n2 _ = n1 == n2
+
 root = User "root" $ unsafePerformIO $ makePassword "rpass" 14
 
 guest = User "guest" $ unsafePerformIO $ makePassword "pass" 14

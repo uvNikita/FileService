@@ -29,7 +29,7 @@ module Database (
 
 
 import qualified File as F
-import           File (File)
+import           File (File, Permissions)
 import qualified User as U
 import           User (User)
 import qualified Data.Map as M
@@ -61,6 +61,7 @@ $(makeAcidic ''Users ['addUser, 'getUser])
 
 type DBUsers = AcidState Users
 
+$(deriveSafeCopy 0 'base ''Permissions)
 $(deriveSafeCopy 0 'base ''File)
 $(deriveSafeCopy 0 'base ''Files)
 

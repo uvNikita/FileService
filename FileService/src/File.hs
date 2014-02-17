@@ -14,7 +14,8 @@
 -----------------------------------------------------------------------------
 
 module File (
-    File (..)
+      File (..)
+    , Permissions (..)
 ) where
 
 
@@ -26,4 +27,7 @@ data File = File {
       filename :: String
     , fileowner :: User
     , filedata :: String
+    , fileperms :: Permissions
 } deriving (Show, Typeable)
+
+data Permissions = N | R | RW deriving (Show, Eq, Ord)

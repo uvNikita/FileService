@@ -22,9 +22,7 @@ module Console (
 
 import qualified File as F
 import qualified User as U
-import           User (User)
 import qualified State as S
-import           State (ST)
 import qualified Data.Map as Map
 import           Data.Map (Map)
 import qualified Database as DB
@@ -39,7 +37,7 @@ import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO
 import           Crypto.PasswordStore (makePassword, verifyPassword)
 import           System.Random (randomRIO)
 
-type Action a = StateT ST IO a
+type Action a = StateT S.ST IO a
 type Args = [String]
 
 class Executable a where
@@ -69,6 +67,7 @@ data FileCommand = FileCommand {
       fcomName :: String
     , fcomAction :: F.File -> Action ()
     , fcomUsage :: String
+    , fcomPerms :: F.Permissions
 }
 
 instance Executable FileCommand where
@@ -78,9 +77,18 @@ instance Executable FileCommand where
     performAction c [filename] = do
         filesDB <- liftM S.files get
         file <- io $ query filesDB (DB.GetFile filename)
+        currUser <- liftM S.currUser get
+        let canProcess f = hasPerms currUser f (fcomPerms c)
         maybe (raise $ "No such file: " ++ filename)
-              (\ f -> (fcomAction c) f)
-              file
+              (\ f -> if canProcess f
+                         then fcomAction c f
+                         else raise "Permission Denied.")
+              (file)
+
+hasPerms :: U.User -> F.File -> F.Permissions -> Bool
+hasPerms user file perms = F.fileowner file == user
+                                       || F.fileperms file >= perms
+                                       || user == U.root
 
 io :: IO a -> Action a
 io = liftIO
@@ -135,7 +143,7 @@ addFile = Command {
           files <- liftM S.files get
           owner <- liftM S.currUser get
           dbFile <- io $ query files (DB.GetFile fname)
-          let file = F.File fname owner fdata
+          let file = F.File fname owner fdata F.R
           let addFile = io $ update files (DB.AddFile file)
           maybe addFile (\ _ -> raise "File exists.") dbFile
      , comArgsNum = 2
@@ -155,8 +163,9 @@ listFiles = Command {
 
 cat = FileCommand {
       fcomName = "cat"
-    , fcomAction = \ file -> io $ putStrLn $ F.filedata file
+    , fcomAction = io . putStrLn . F.filedata
     , fcomUsage = "cat filename"
+    , fcomPerms = F.R
 }
 
 timeLeft = Command {

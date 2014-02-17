@@ -23,6 +23,7 @@ module Database (
     , GetFile (..)
     , GetFiles (..)
     , AddFile (..)
+    , DelFile (..)
     , initFiles
     , initUsers
 ) where
@@ -34,6 +35,7 @@ import qualified User as U
 import           User (User)
 import qualified Data.Map as M
 import           Data.Map (Map)
+import           Data.List (find)
 import           Data.SafeCopy (deriveSafeCopy, base)
 import           Data.Acid (AcidState, Update, Query, makeAcidic)
 import           Control.Monad.Reader (ask)
@@ -70,6 +72,11 @@ addFile file = do
     Files files <- get
     put $ Files $ file : files
 
+delFile :: File -> Update Files ()
+delFile file = do
+    Files files <- get
+    put $ Files $ filter (/= file) files
+
 getFiles :: Query Files [File]
 getFiles = do
     Files files <- ask
@@ -78,10 +85,11 @@ getFiles = do
 getFile :: String -> Query Files (Maybe File)
 getFile fname = do
     Files files <- ask
-    let filesMap = map (\ f -> (F.filename f, f)) files
-    return $ lookup fname filesMap
+    return $ findFile fname files
 
-$(makeAcidic ''Files ['addFile, 'getFile, 'getFiles])
+findFile fname files = find ((== fname) . F.filename) files
+
+$(makeAcidic ''Files ['addFile, 'getFile, 'getFiles, 'delFile])
 
 type DBFiles = AcidState Files
 

@@ -62,27 +62,28 @@ instance Executable Command where
     excName = comName
     excArgsNum = comArgsNum
     excUsage = comUsage
-    performAction c args = (comAction c) args
+    performAction = comAction
 
 data FileCommand = FileCommand {
       fcomName :: String
-    , fcomAction :: F.File -> Action ()
+    , fcomAction :: F.File -> Args -> Action ()
     , fcomUsage :: String
+    , fcomArgsNum :: Int
     , fcomPerms :: F.Permissions
 }
 
 instance Executable FileCommand where
     excName = fcomName
-    excArgsNum c = 1 :: Int
+    excArgsNum c = fcomArgsNum c + 1
     excUsage = fcomUsage
-    performAction c [filename] = do
+    performAction c (filename:args) = do
         filesDB <- liftM S.files get
         file <- io $ query filesDB (DB.GetFile filename)
         currUser <- liftM S.currUser get
         let canProcess f = hasPerms currUser f (fcomPerms c)
         maybe (raise $ "No such file: " ++ filename)
               (\ f -> if canProcess f
-                         then fcomAction c f
+                         then fcomAction c f args
                          else raise "Permission Denied.")
               (file)
 
@@ -99,7 +100,7 @@ toMap cs = Map.fromList (map (\ c -> (excName c, c)) cs)
 
 (commands, fcommands) = (toMap coms, toMap fcoms)
                         where coms = [login, printUser, addUser, addFile, listFiles, timeLeft]
-                              fcoms = [cat]
+                              fcoms = [catFile, rmFile, putInFile, chMod]
 
 login = Command {
       comName = "login"
@@ -128,7 +129,7 @@ addUser = Command {
           let addUser = io $ update users (DB.AddUser user)
           maybe addUser (\ _ -> raise "User exists.") dbUser
     , comArgsNum = 2
-    , comUsage = "addUser username password"
+    , comUsage = "adduser username password"
 }
 
 printUser = Command {
@@ -156,17 +157,58 @@ listFiles = Command {
     , comAction = \ [] -> do
           filesDB <- liftM S.files get
           files <- io $ query filesDB DB.GetFiles
-          let f2str f = F.filename f ++ " : " ++ (U.username . F.fileowner) f
+          let f2str f = F.filename f ++ "\t" ++
+                        (show $ F.fileperms f) ++ "\t" ++
+                        (U.username . F.fileowner) f
+
           io $ mapM_ (putStrLn . f2str) files
     , comArgsNum = 0
     , comUsage = "ls"
 }
 
-cat = FileCommand {
+catFile = FileCommand {
       fcomName = "cat"
-    , fcomAction = io . putStrLn . F.filedata
+    , fcomAction = \ f [] -> io $ putStrLn $ F.filedata f
     , fcomUsage = "cat filename"
     , fcomPerms = F.R
+    , fcomArgsNum = 0
+}
+
+putInFile = FileCommand {
+      fcomName = "put"
+    , fcomAction = \ f [fdata] -> do
+        let nf = f {F.filedata = fdata}
+        files <- liftM S.files get
+        io $ update files (DB.DelFile f)
+        io $ update files (DB.AddFile nf)
+    , fcomUsage = "put filename \"new data\""
+    , fcomPerms = F.W
+    , fcomArgsNum = 1
+}
+
+rmFile = FileCommand {
+      fcomName = "rm"
+    , fcomAction = \ f [] -> do
+        files <- liftM S.files get
+        io $ update files (DB.DelFile f)
+    , fcomUsage = "rm filename"
+    , fcomPerms = F.W
+    , fcomArgsNum = 0
+}
+
+chMod = FileCommand {
+      fcomName = "chmod"
+    , fcomAction = \ f [perms] -> do
+        case maybeRead perms of
+            Nothing -> raise "Invalid permissions."
+            Just ps -> do
+                let nf = f {F.fileperms = ps}
+                files <- liftM S.files get
+                io $ update files (DB.DelFile f)
+                io $ update files (DB.AddFile nf)
+    , fcomUsage = "chmod filename r-"
+    , fcomPerms = F.W
+    , fcomArgsNum = 1
 }
 
 timeLeft = Command {

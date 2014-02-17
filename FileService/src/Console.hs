@@ -36,7 +36,16 @@ import           Control.Exception (finally)
 import           Control.Monad (unless, when)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
+import           System.IO (Handle)
 import           System.Random (randomRIO)
+import           System.Log.Handler.Simple (fileHandler, GenericHandler)
+import           System.Log.Handler (setFormatter, close)
+import           System.Log.Logger (rootLoggerName, setHandlers, updateGlobalLogger,
+                                    Priority(INFO), Priority(WARNING),
+                                    infoM, warningM, setLevel)
+import           System.Log.Formatter (simpleLogFormatter)
+
+logger = rootLoggerName
 
 type Action a = StateT S.ST IO a
 type Args = [String]
@@ -291,7 +300,19 @@ askQuestion = do
     res <- io $ liftM maybeRead getLine
     return $ validateCalc x1 x2 res
 
+setupLogging = do
+    let logPath = "/tmp/file_service.log"
+    logFileHandler <- fileHandler logPath WARNING
+    let logFileHandler' = withFormatter logFileHandler
+    updateGlobalLogger logger (setHandlers [logFileHandler'])
+    return logFileHandler
+
+withFormatter :: GenericHandler Handle -> GenericHandler Handle
+withFormatter handler = setFormatter handler formatter
+    where formatter = simpleLogFormatter "[$time $loggername $prio] $msg"
+
 run code = do
+    logHandler <- setupLogging
     users <- openLocalStateFrom "/tmp/file_service/users" DB.initUsers
     files <- openLocalStateFrom "/tmp/file_service/files" DB.initFiles
     currTime <- timestamp
@@ -304,3 +325,4 @@ run code = do
     finally (runStateT code initState) $ do
         closeAcidState users
         closeAcidState files
+        close logHandler

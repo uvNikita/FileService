@@ -24,11 +24,11 @@ module Console (
 import qualified File as F
 import qualified User as U
 import qualified State as S
+import           Util
 import qualified Data.Map as Map
 import           Data.Map (Map)
 import qualified Database as DB
 import qualified Data.ByteString.Char8 as B
-import           Data.Maybe (listToMaybe)
 import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Data.List.Split (splitOn)
 import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
@@ -50,6 +50,9 @@ class Executable a where
     exc e args = if length args == excArgsNum e
                     then performAction e args
                     else raise $ "Usage: " ++ excUsage e
+
+toMap :: Executable a => [a] -> Map.Map String a
+toMap cs = Map.fromList (map (\ c -> (excName c, c)) cs)
 
 data Command = Command {
       comName :: String
@@ -95,11 +98,9 @@ hasPerms user file perms = F.fileowner file == user ||
 io :: IO a -> Action a
 io = liftIO
 
-toMap :: Executable a => [a] -> Map.Map String a
-toMap cs = Map.fromList (map (\ c -> (excName c, c)) cs)
-
 (commands, fcommands) = (toMap coms, toMap fcoms)
-                        where coms = [login, printUser, addUser, addFile, listFiles, timeLeft]
+                        where coms = [login, printUser, addUser, addFile
+                                    , listFiles, timeLeft, delUser]
                               fcoms = [catFile, rmFile, putInFile, chMod]
 
 login = Command {
@@ -121,15 +122,34 @@ login = Command {
 addUser = Command {
       comName = "adduser"
     , comAction = \ [username, password] -> do
-          users <- liftM S.users get
-          let pass = B.pack password
-          passHash <- io $ makePassword pass 14
-          let user = U.User username passHash
-          dbUser <- io $ query users (DB.GetUser username)
-          let addUser = io $ update users (DB.AddUser user)
-          maybe addUser (\ _ -> raise "User exists.") dbUser
+          if not $ U.validPass password
+              then raise "Not valid pass." >> return ()
+              else do
+                   users <- liftM S.users get
+                   let pass = B.pack password
+                   passHash <- io $ makePassword pass 14
+                   let user = U.User username passHash
+                   dbUser <- io $ query users (DB.GetUser username)
+                   let addUser = io $ update users (DB.AddUser user)
+                   maybe addUser (\ _ -> raise "User exists.") dbUser
     , comArgsNum = 2
     , comUsage = "adduser username password"
+}
+
+delUser = Command {
+      comName = "deluser"
+    , comAction = \ [username] -> do
+          currUser <- liftM S.currUser get
+          if currUser /= U.root
+             then raise "Only root can delete users."
+             else do
+                  users <- liftM S.users get
+                  user <- io $query users (DB.GetUser username)
+                  maybe (raise "No such user")
+                        (\ u -> io $ update users (DB.DelUser u))
+                        (user)
+    , comArgsNum = 1
+    , comUsage = "deluser username"
 }
 
 printUser = Command {
@@ -270,13 +290,6 @@ askQuestion = do
     io $ putStrLn $ show x1 ++ " + " ++ show x2 ++ " = "
     res <- io $ liftM maybeRead getLine
     return $ validateCalc x1 x2 res
-
-validateCalc :: Int -> Int -> Maybe Int -> Bool
-validateCalc _ _ Nothing = False
-validateCalc x1 x2 (Just res) = res == x1 + x2
-
-maybeRead :: Read a => String -> Maybe a
-maybeRead = fmap fst . listToMaybe . filter (null . snd) . reads
 
 run code = do
     users <- openLocalStateFrom "/tmp/file_service/users" DB.initUsers

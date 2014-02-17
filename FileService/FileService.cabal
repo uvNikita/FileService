@@ -14,7 +14,7 @@ executable FileService
     main-is: Main.hs
     buildable: True
     hs-source-dirs: src
-    other-modules: State Console Database File User
+    other-modules: Util State Console Database File User
  
 test-suite test-FileService
     build-depends: QuickCheck -any, acid-state -any, base -any,

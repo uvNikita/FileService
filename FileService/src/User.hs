@@ -18,6 +18,7 @@ module User (
       User (..)
     , root
     , guest
+    , validPass
 ) where
 
 import Data.Map (Map, fromList)
@@ -34,6 +35,8 @@ data User = User {
 
 instance Eq User where
     User n1 _ == User n2 _ = n1 == n2
+
+validPass pass = length pass > 3
 
 root = User "root" $ unsafePerformIO $ makePassword "rpass" 14
 

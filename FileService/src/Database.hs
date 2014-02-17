@@ -20,6 +20,7 @@ module Database (
     , DBFiles
     , GetUser (..)
     , AddUser (..)
+    , DelUser (..)
     , GetFile (..)
     , GetFiles (..)
     , AddFile (..)
@@ -54,12 +55,18 @@ addUser user = do
     Users users <- get
     put $ Users $ M.insert (U.username user) user users
 
+delUser :: User -> Update Users ()
+delUser user = do
+    Users users <- get
+    let username = U.username user
+    put $ Users $ M.delete username users
+
 getUser :: String -> Query Users (Maybe User)
 getUser username = do
     Users users <- ask
     return $ M.lookup username users
 
-$(makeAcidic ''Users ['addUser, 'getUser])
+$(makeAcidic ''Users ['addUser, 'getUser, 'delUser])
 
 type DBUsers = AcidState Users
 

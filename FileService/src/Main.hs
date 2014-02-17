@@ -13,6 +13,7 @@
 -----------------------------------------------------------------------------
 import Console
 import Control.Monad (unless)
+import System.Console.Readline (readline, addHistory)
 
 authLoop = do
     isValid <- checkAuth
@@ -22,9 +23,14 @@ authLoop = do
 
 loop = do
     authLoop
-    (cName, args) <- readInput
-    unless (cName == "exit") $ do
-        excCommand cName args
-        loop
+    maybeLine <- io $ readline "# "
+    case maybeLine of
+        Nothing -> return ()
+        Just "exit" -> return ()
+        Just line -> do
+            let (cName, args) = parseCommand line
+            io $ addHistory line
+            excCommand cName args
+            loop
 
 main = run loop

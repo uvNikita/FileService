@@ -15,7 +15,8 @@
 module Console (
       run
     , excCommand
-    , readInput
+    , parseCommand
+    , io
     , raise
     , checkAuth
 ) where
@@ -179,12 +180,9 @@ timeLeft = Command {
     , comUsage = "tl"
 }
 
-readInput :: Action (String, [String])
-readInput = liftM parseLine (io getLine)
-
-parseLine :: String -> (String, [String])
-parseLine "" = ("", [""])
-parseLine line =
+parseCommand :: String -> (String, [String])
+parseCommand "" = ("", [""])
+parseCommand line =
     (command, args)
     where (command, rawArgs) = break (== ' ') line
           args = filter (not . null) $ parse rawArgs

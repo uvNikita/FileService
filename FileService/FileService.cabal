@@ -9,18 +9,18 @@ data-dir: ""
 executable FileService
     build-depends: QuickCheck -any, acid-state -any, base -any,
                    bytestring -any, containers -any, mtl -any,
-                   pwstore-purehaskell -any, random -any, safecopy -any, split -any,
-                   time -any
+                   pwstore-purehaskell -any, random -any, readline -any,
+                   safecopy -any, split -any, time -any
     main-is: Main.hs
     buildable: True
     hs-source-dirs: src
-    other-modules: State User File Console Database
+    other-modules: State Console Database File User
  
 test-suite test-FileService
     build-depends: QuickCheck -any, acid-state -any, base -any,
                    bytestring -any, containers -any, mtl -any,
-                   pwstore-purehaskell -any, random -any, safecopy -any, split -any,
-                   time -any
+                   pwstore-purehaskell -any, random -any, readline -any,
+                   safecopy -any, split -any, time -any
     type: exitcode-stdio-1.0
     main-is: Main.hs
     buildable: True

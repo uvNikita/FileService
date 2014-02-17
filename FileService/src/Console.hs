@@ -86,9 +86,9 @@ instance Executable FileCommand where
               (file)
 
 hasPerms :: U.User -> F.File -> F.Permissions -> Bool
-hasPerms user file perms = F.fileowner file == user
-                                       || F.fileperms file >= perms
-                                       || user == U.root
+hasPerms user file perms = F.fileowner file == user ||
+                           F.fileperms file >= perms ||
+                           user == U.root
 
 io :: IO a -> Action a
 io = liftIO
@@ -184,8 +184,18 @@ readInput = liftM parseLine (io getLine)
 
 parseLine :: String -> (String, [String])
 parseLine "" = ("", [""])
-parseLine line = (command, args)
-                 where command : args = filter (not . null) $ splitOn " " line
+parseLine line =
+    (command, args)
+    where (command, rawArgs) = break (== ' ') line
+          args = filter (not . null) $ parse rawArgs
+          parse "" = [""]
+          parse (' ' : cs) = [] : parse cs
+          parse ('"' : cs) = arg : parse cs'
+                               where (arg, cs') = case break (== '"') cs of
+                                                      (arg, '"' : cs'') -> (arg, cs'')
+                                                      (arg, cs'') -> (arg, cs'')
+          parse (c : rest) = (c : arg) : args
+                             where arg : args = parse rest
 
 excCommand :: String -> [String] -> Action ()
 excCommand cName args = do

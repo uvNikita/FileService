@@ -33,7 +33,7 @@ import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Data.List.Split (splitOn)
 import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
 import           Control.Exception (finally)
-import           Control.Monad (unless, when)
+import           Control.Monad (unless, when, void)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
 import           System.IO (Handle)
@@ -130,9 +130,9 @@ login = Command {
 
 addUser = Command {
       comName = "adduser"
-    , comAction = \ [username, password] -> do
+    , comAction = \ [username, password] ->
           if not $ U.validPass password
-              then raise "Not valid pass." >> return ()
+              then void $ raise "Not valid pass."
               else do
                    users <- liftM S.users get
                    let pass = B.pack password
@@ -155,7 +155,7 @@ delUser = Command {
                   users <- liftM S.users get
                   user <- io $query users (DB.GetUser username)
                   maybe (raise "No such user")
-                        (\ u -> io $ update users (DB.DelUser u))
+                        (io . update users . DB.DelUser)
                         (user)
     , comArgsNum = 1
     , comUsage = "deluser username"
@@ -187,8 +187,8 @@ listFiles = Command {
           filesDB <- liftM S.files get
           files <- io $ query filesDB DB.GetFiles
           let f2str f = F.filename f ++ "\t" ++
-                        (show $ F.fileperms f) ++ "\t" ++
-                        (U.username . F.fileowner) f
+                        show (F.fileperms f) ++ "\t" ++
+                        U.username (F.fileowner f)
 
           io $ mapM_ (putStrLn . f2str) files
     , comArgsNum = 0
@@ -207,9 +207,7 @@ putInFile = FileCommand {
       fcomName = "put"
     , fcomAction = \ f [fdata] -> do
         let nf = f {F.filedata = fdata}
-        files <- liftM S.files get
-        io $ update files (DB.DelFile f)
-        io $ update files (DB.AddFile nf)
+        replace f nf
     , fcomUsage = "put filename \"new data\""
     , fcomPerms = F.W
     , fcomArgsNum = 1
@@ -227,14 +225,12 @@ rmFile = FileCommand {
 
 chMod = FileCommand {
       fcomName = "chmod"
-    , fcomAction = \ f [perms] -> do
+    , fcomAction = \ f [perms] ->
         case maybeRead perms of
             Nothing -> raise "Invalid permissions."
             Just ps -> do
                 let nf = f {F.fileperms = ps}
-                files <- liftM S.files get
-                io $ update files (DB.DelFile f)
-                io $ update files (DB.AddFile nf)
+                replace f nf
     , fcomUsage = "chmod filename r-"
     , fcomPerms = F.W
     , fcomArgsNum = 1
@@ -250,6 +246,11 @@ timeLeft = Command {
     , comArgsNum = 0
     , comUsage = "tl"
 }
+
+replace file newfile = do
+    files <- liftM S.files get
+    io $ update files (DB.DelFile file)
+    io $ update files (DB.AddFile newfile)
 
 parseCommand :: String -> (String, [String])
 parseCommand "" = ("", [""])

@@ -14,15 +14,17 @@
 import Console
 import Control.Monad (unless)
 
-loop = do
+authLoop = do
     isValid <- checkAuth
     unless isValid $ do
         raise "Not valid user."
-        loop
+        authLoop
+
+loop = do
+    authLoop
     (cName, args) <- readInput
     unless (cName == "exit") $ do
         excCommand cName args
         loop
-
 
 main = run loop

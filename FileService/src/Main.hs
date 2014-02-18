@@ -25,7 +25,7 @@ loop = do
     authLoop
     maybeLine <- io $ readline "# "
     case maybeLine of
-        Nothing -> io $ putStrLn "" >> return ()
+        Nothing -> io $ putStrLn ""
         Just "exit" -> return ()
         Just line -> do
             let (cName, args) = parseCommand line

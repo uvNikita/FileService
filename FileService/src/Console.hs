@@ -33,7 +33,7 @@ import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Data.List.Split (splitOn)
 import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
 import           Control.Exception (finally)
-import           Control.Monad (unless, when, void)
+import           Control.Monad (unless, when)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
 import           System.IO (Handle)
@@ -96,7 +96,9 @@ instance Executable FileCommand where
         maybe (raise $ "No such file: " ++ filename)
               (\ f -> if canProcess f
                          then fcomAction c f args
-                         else raise "Permission Denied.")
+                         else do
+                            io $ warningM logger $ "Permission Denied: " ++ excName c
+                            raise "Permission Denied.")
               (file)
 
 hasPerms :: U.User -> F.File -> F.Permissions -> Bool
@@ -118,11 +120,14 @@ login = Command {
           users <- liftM S.users get
           user <- io $ query users (DB.GetUser username)
           let pass = B.pack password
+          let error = do
+              raise "Invalid username or password."
+              io $  warningM logger "Failed login"
           case user of
-              Nothing -> raise "Invalid username or password."
+              Nothing -> error
               Just user -> if verifyPassword pass $ U.passHash user
                           then get >>= (\ st -> put $ st {S.currUser = user})
-                          else raise "Invalid username or password"
+                          else error
     , comArgsNum = 2
     , comUsage = "login username password"
 
@@ -132,7 +137,7 @@ addUser = Command {
       comName = "adduser"
     , comAction = \ [username, password] ->
           if not $ U.validPass password
-              then void $ raise "Not valid pass."
+              then raise "Not valid pass."
               else do
                    users <- liftM S.users get
                    let pass = B.pack password
@@ -150,13 +155,15 @@ delUser = Command {
     , comAction = \ [username] -> do
           currUser <- liftM S.currUser get
           if currUser /= U.root
-             then raise "Only root can delete users."
+             then do
+                raise "Only root can delete users."
+                io $ warningM logger "Non root tried to delete user."
              else do
-                  users <- liftM S.users get
-                  user <- io $query users (DB.GetUser username)
-                  maybe (raise "No such user")
-                        (io . update users . DB.DelUser)
-                        (user)
+                users <- liftM S.users get
+                user <- io $query users (DB.GetUser username)
+                maybe (raise "No such user")
+                      (io . update users . DB.DelUser)
+                      (user)
     , comArgsNum = 1
     , comUsage = "deluser username"
 }

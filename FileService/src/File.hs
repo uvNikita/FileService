@@ -20,7 +20,7 @@ module File (
 
 
 import Data.Typeable (Typeable)
-import User (User)
+import User (User, username)
 
 
 data File = File {
@@ -28,10 +28,15 @@ data File = File {
     , fileowner :: User
     , filedata :: String
     , fileperms :: Permissions
-} deriving (Show, Typeable)
+} deriving (Typeable)
 
 instance Eq File where
     f1 == f2 = filename f1 == filename f2
+
+instance Show File where
+    show f = filename f ++ "\t" ++
+             show (fileperms f) ++ "\t" ++
+             username (fileowner f)
 
 data Permissions = N | R | W | RW deriving (Eq)
 

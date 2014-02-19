@@ -14,6 +14,7 @@
 import Console
 import Control.Monad (unless)
 import System.Console.Readline (readline, addHistory)
+import Util (parseCommand)
 
 authLoop = do
     isValid <- checkAuth

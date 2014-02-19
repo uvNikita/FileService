@@ -15,7 +15,6 @@
 module Console (
       run
     , excCommand
-    , parseCommand
     , io
     , raise
     , checkAuth
@@ -30,9 +29,11 @@ import           Data.Map (Map)
 import qualified Database as DB
 import qualified Data.ByteString.Char8 as B
 import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
+import           Data.Maybe (fromMaybe)
 import           Data.List.Split (splitOn)
 import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
 import           Control.Exception (finally)
+import           Control.Applicative ((<$>))
 import           Control.Monad (unless, when)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
@@ -193,11 +194,7 @@ listFiles = Command {
     , comAction = \ [] -> do
           filesDB <- liftM S.files get
           files <- io $ query filesDB DB.GetFiles
-          let f2str f = F.filename f ++ "\t" ++
-                        show (F.fileperms f) ++ "\t" ++
-                        U.username (F.fileowner f)
-
-          io $ mapM_ (putStrLn . f2str) files
+          io $ mapM_ print files
     , comArgsNum = 0
     , comUsage = "ls"
 }
@@ -259,21 +256,6 @@ replace file newfile = do
     io $ update files (DB.DelFile file)
     io $ update files (DB.AddFile newfile)
 
-parseCommand :: String -> (String, [String])
-parseCommand "" = ("", [""])
-parseCommand line =
-    (command, args)
-    where (command, rawArgs) = break (== ' ') line
-          args = filter (not . null) $ parse rawArgs
-          parse "" = [""]
-          parse (' ' : cs) = [] : parse cs
-          parse ('"' : cs) = arg : parse cs'
-                               where (arg, cs') = case break (== '"') cs of
-                                                      (arg, '"' : cs'') -> (arg, cs'')
-                                                      (arg, cs'') -> (arg, cs'')
-          parse (c : rest) = (c : arg) : args
-                             where arg : args = parse rest
-
 excCommand :: String -> [String] -> Action ()
 excCommand cName args = do
     let noCommand = raise $ "No such command: " ++ cName
@@ -305,8 +287,9 @@ askQuestion = do
     x1 <- io $ randomRIO (1, 10)
     x2 <- io $ randomRIO (1, 10)
     io $ putStrLn $ show x1 ++ " + " ++ show x2 ++ " = "
-    res <- io $ liftM maybeRead getLine
-    return $ validateCalc x1 x2 res
+    res <- io $ liftM maybeRead getLine :: Action (Maybe Int)
+    let maybeValid = (x1 + x2 ==) <$> res
+    return $ fromMaybe False maybeValid
 
 setupLogging = do
     let logPath = "/tmp/file_service.log"

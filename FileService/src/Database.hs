@@ -94,6 +94,7 @@ getFile fname = do
     Files files <- ask
     return $ findFile fname files
 
+findFile :: String -> [File] -> Maybe File
 findFile fname = find ((== fname) . F.filename)
 
 $(makeAcidic ''Files ['addFile, 'getFile, 'getFiles, 'delFile])

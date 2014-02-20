@@ -21,7 +21,6 @@ module User (
     , validPass
 ) where
 
-import Data.Map (Map, fromList)
 import Data.Typeable (Typeable)
 import Data.ByteString (ByteString)
 import System.IO.Unsafe (unsafePerformIO)
@@ -36,8 +35,11 @@ data User = User {
 instance Eq User where
     User n1 _ == User n2 _ = n1 == n2
 
+validPass :: String -> Bool
 validPass pass = length pass > 3
 
+root :: User
 root = User "root" $ unsafePerformIO $ makePassword "rpass" 14
 
+guest :: User
 guest = User "guest" $ unsafePerformIO $ makePassword "pass" 14

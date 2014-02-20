@@ -32,8 +32,8 @@ parseCommand line =
           parse "" = [""]
           parse (' ' : cs) = [] : parse cs
           parse ('"' : cs) = arg : parse cs'
-                               where (arg, cs') = case break (== '"') cs of
-                                                      (arg, '"' : cs'') -> (arg, cs'')
-                                                      (arg, cs'') -> (arg, cs'')
-          parse (c : rest) = (c : arg) : args
-                             where arg : args = parse rest
+                             where (arg, cs') = case break (== '"') cs of
+                                                      (a, '"' : cs'') -> (a, cs'')
+                                                      (a, cs'') -> (a, cs'')
+          parse (c : rest) = (c : arg) : restArgs
+                             where arg : restArgs = parse rest

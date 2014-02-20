@@ -18,6 +18,7 @@ module Console (
     , io
     , raise
     , checkAuth
+    , Action
 ) where
 
 import qualified File as F
@@ -30,11 +31,10 @@ import qualified Database as DB
 import qualified Data.ByteString.Char8 as B
 import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Data.Maybe (fromMaybe)
-import           Data.List.Split (splitOn)
 import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
 import           Control.Exception (finally)
 import           Control.Applicative ((<$>))
-import           Control.Monad (unless, when)
+import           Control.Monad (when)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
 import           System.IO (Handle)
@@ -42,10 +42,10 @@ import           System.Random (randomRIO)
 import           System.Log.Handler.Simple (fileHandler, GenericHandler)
 import           System.Log.Handler (setFormatter, close)
 import           System.Log.Logger (rootLoggerName, setHandlers, updateGlobalLogger,
-                                    Priority(INFO), Priority(WARNING),
-                                    infoM, warningM, setLevel)
+                                    Priority(WARNING), warningM)
 import           System.Log.Formatter (simpleLogFormatter)
 
+logger :: String
 logger = rootLoggerName
 
 type Action a = StateT S.ST IO a
@@ -101,6 +101,7 @@ instance Executable FileCommand where
                             io $ warningM logger $ "Permission Denied: " ++ excName c
                             raise "Permission Denied.")
               (file)
+    performAction c [] = raise $ "Usage: " ++ excUsage c
 
 hasPerms :: U.User -> F.File -> F.Permissions -> Bool
 hasPerms user file perms = F.fileowner file == user ||
@@ -110,25 +111,28 @@ hasPerms user file perms = F.fileowner file == user ||
 io :: IO a -> Action a
 io = liftIO
 
-(commands, fcommands) = (toMap coms, toMap fcoms)
-                        where coms = [login, printUser, addUser, addFile
-                                    , listFiles, timeLeft, delUser]
-                              fcoms = [catFile, rmFile, putInFile, chMod]
+commands :: Map String Command
+commands = toMap coms
+           where coms = [login, printUser, addUser, addFile
+                       , listFiles, timeLeft, delUser]
+fcommands :: Map String FileCommand
+fcommands = toMap fcoms
+            where fcoms = [catFile, rmFile, putInFile, chMod]
 
 login = Command {
       comName = "login"
     , comAction = \ [username, password] -> do
           users <- liftM S.users get
-          user <- io $ query users (DB.GetUser username)
+          maybeUser <- io $ query users (DB.GetUser username)
           let pass = B.pack password
-          let error = do
+          let nonValid = do
               raise "Invalid username or password."
               io $  warningM logger "Failed login"
-          case user of
-              Nothing -> error
+          case maybeUser of
+              Nothing -> nonValid
               Just user -> if verifyPassword pass $ U.passHash user
                           then get >>= (\ st -> put $ st {S.currUser = user})
-                          else error
+                          else nonValid
     , comArgsNum = 2
     , comUsage = "login username password"
 
@@ -145,8 +149,8 @@ addUser = Command {
                    passHash <- io $ makePassword pass 14
                    let user = U.User username passHash
                    dbUser <- io $ query users (DB.GetUser username)
-                   let addUser = io $ update users (DB.AddUser user)
-                   maybe addUser (\ _ -> raise "User exists.") dbUser
+                   let addUser' = io $ update users (DB.AddUser user)
+                   maybe addUser' (\ _ -> raise "User exists.") dbUser
     , comArgsNum = 2
     , comUsage = "adduser username password"
 }
@@ -183,8 +187,8 @@ addFile = Command {
           owner <- liftM S.currUser get
           dbFile <- io $ query files (DB.GetFile fname)
           let file = F.File fname owner fdata F.R
-          let addFile = io $ update files (DB.AddFile file)
-          maybe addFile (\ _ -> raise "File exists.") dbFile
+          let addFile' = io $ update files (DB.AddFile file)
+          maybe addFile' (\ _ -> raise "File exists.") dbFile
      , comArgsNum = 2
      , comUsage = "addfile filename myfiledata"
 }
@@ -251,9 +255,10 @@ timeLeft = Command {
     , comUsage = "tl"
 }
 
+replace :: F.File -> F.File -> Action ()
 replace file newfile = do
     files <- liftM S.files get
-    io $ update files (DB.DelFile file)
+    _ <- io $ update files (DB.DelFile file)
     io $ update files (DB.AddFile newfile)
 
 excCommand :: String -> [String] -> Action ()
@@ -263,8 +268,10 @@ excCommand cName args = do
         Just c -> exc c args
         Nothing -> maybe noCommand (`exc` args) (Map.lookup cName fcommands)
 
+raise :: String -> Action ()
 raise msg = io $ putStrLn msg
 
+timestamp :: IO (DiffTime)
 timestamp = liftM utctDayTime getCurrentTime
 
 checkAuth :: Action Bool
@@ -283,6 +290,7 @@ updateValTime = do
     state <- get
     put state {S.valTime = currTime}
 
+askQuestion :: Action (Bool)
 askQuestion = do
     x1 <- io $ randomRIO (1, 10)
     x2 <- io $ randomRIO (1, 10)
@@ -291,6 +299,7 @@ askQuestion = do
     let maybeValid = (x1 + x2 ==) <$> res
     return $ fromMaybe False maybeValid
 
+setupLogging :: IO (GenericHandler Handle)
 setupLogging = do
     let logPath = "/tmp/file_service.log"
     logFileHandler <- fileHandler logPath WARNING
@@ -302,6 +311,7 @@ withFormatter :: GenericHandler Handle -> GenericHandler Handle
 withFormatter handler = setFormatter handler formatter
     where formatter = simpleLogFormatter "[$time $loggername $prio] $msg"
 
+run :: Action () -> IO ()
 run code = do
     logHandler <- setupLogging
     users <- openLocalStateFrom "/tmp/file_service/users" DB.initUsers
@@ -313,7 +323,8 @@ run code = do
         , S.files = files
         , S.valTime = currTime
     }
-    finally (runStateT code initState) $ do
+    _ <- finally (runStateT code initState) $ do
         closeAcidState users
         closeAcidState files
         close logHandler
+    return ()

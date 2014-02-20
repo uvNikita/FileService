@@ -16,12 +16,14 @@ import Control.Monad (unless)
 import System.Console.Readline (readline, addHistory)
 import Util (parseCommand)
 
+authLoop :: Action ()
 authLoop = do
     isValid <- checkAuth
     unless isValid $ do
         raise "Not valid user."
         authLoop
 
+loop :: Action ()
 loop = do
     authLoop
     maybeLine <- io $ readline "# "
@@ -34,4 +36,5 @@ loop = do
             excCommand cName args
             loop
 
+main :: IO ()
 main = run loop

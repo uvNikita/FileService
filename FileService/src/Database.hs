@@ -25,6 +25,7 @@ module Database (
     , GetFiles (..)
     , AddFile (..)
     , DelFile (..)
+    , DB (..)
     , initFiles
     , initUsers
 ) where
@@ -100,6 +101,11 @@ findFile fname = find ((== fname) . F.filename)
 $(makeAcidic ''Files ['addFile, 'getFile, 'getFiles, 'delFile])
 
 type DBFiles = AcidState Files
+
+data DB = DB {
+      users :: DBUsers
+    , files :: DBFiles
+}
 
 initFiles = Files []
 

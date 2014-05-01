@@ -25,9 +25,9 @@ import qualified File as F
 import qualified User as U
 import qualified State as S
 import           Util
+import qualified Database as DB
 import qualified Data.Map as Map
 import           Data.Map (Map)
-import qualified Database as DB
 import qualified Data.ByteString.Char8 as B
 import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Data.Maybe (fromMaybe)
@@ -35,6 +35,8 @@ import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
 import           Control.Exception (finally)
 import           Control.Applicative ((<$>))
 import           Control.Monad (when)
+import           Control.Monad.Trans (lift)
+import           Control.Monad.Reader (ReaderT, ask, runReaderT)
 import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
 import           System.IO (Handle)
@@ -48,7 +50,14 @@ import           System.Log.Formatter (simpleLogFormatter)
 logger :: String
 logger = rootLoggerName
 
-type Action a = StateT S.ST IO a
+type Action = ReaderT DB.DB (StateT S.ST IO)
+
+getDB :: Action DB.DB
+getDB = ask
+
+getST :: Action S.ST
+getST = lift get
+
 type Args = [String]
 
 class Executable a where
@@ -90,9 +99,9 @@ instance Executable FileCommand where
     excArgsNum c = fcomArgsNum c + 1
     excUsage = fcomUsage
     performAction c (filename:args) = do
-        filesDB <- liftM S.files get
+        filesDB <- liftM DB.files getDB
         file <- io $ query filesDB (DB.GetFile filename)
-        currUser <- liftM S.currUser get
+        currUser <- liftM S.currUser getST
         let canProcess f = hasPerms currUser f (fcomPerms c)
         maybe (raise $ "No such file: " ++ filename)
               (\ f -> if canProcess f
@@ -122,7 +131,7 @@ fcommands = toMap fcoms
 login = Command {
       comName = "login"
     , comAction = \ [username, password] -> do
-          users <- liftM S.users get
+          users <- liftM DB.users getDB
           maybeUser <- io $ query users (DB.GetUser username)
           let pass = B.pack password
           let nonValid = do
@@ -131,7 +140,7 @@ login = Command {
           case maybeUser of
               Nothing -> nonValid
               Just user -> if verifyPassword pass $ U.passHash user
-                          then get >>= (\ st -> put $ st {S.currUser = user})
+                          then getST >>= (\ st -> put $ st {S.currUser = user})
                           else nonValid
     , comArgsNum = 2
     , comUsage = "login username password"
@@ -144,7 +153,7 @@ addUser = Command {
           if not $ U.validPass password
               then raise "Not valid pass."
               else do
-                   users <- liftM S.users get
+                   users <- liftM DB.users getDB
                    let pass = B.pack password
                    passHash <- io $ makePassword pass 14
                    let user = U.User username passHash
@@ -158,13 +167,13 @@ addUser = Command {
 delUser = Command {
       comName = "deluser"
     , comAction = \ [username] -> do
-          currUser <- liftM S.currUser get
+          currUser <- liftM S.currUser getST
           if currUser /= U.root
              then do
                 raise "Only root can delete users."
                 io $ warningM logger "Non root tried to delete user."
              else do
-                users <- liftM S.users get
+                users <- liftM DB.users getDB
                 user <- io $query users (DB.GetUser username)
                 maybe (raise "No such user")
                       (io . update users . DB.DelUser)
@@ -175,7 +184,7 @@ delUser = Command {
 
 printUser = Command {
       comName = "pu"
-    , comAction = \ [] -> get >>= (io . putStrLn . U.username . S.currUser)
+    , comAction = \ [] -> getST >>= (io . putStrLn . U.username . S.currUser)
     , comArgsNum = 0
     , comUsage = "pu"
 }
@@ -183,8 +192,8 @@ printUser = Command {
 addFile = Command {
       comName = "addfile"
     , comAction = \ [fname, fdata] -> do
-          files <- liftM S.files get
-          owner <- liftM S.currUser get
+          files <- liftM DB.files getDB
+          owner <- liftM S.currUser getST
           dbFile <- io $ query files (DB.GetFile fname)
           let file = F.File fname owner fdata F.R
           let addFile' = io $ update files (DB.AddFile file)
@@ -196,7 +205,7 @@ addFile = Command {
 listFiles = Command {
       comName = "ls"
     , comAction = \ [] -> do
-          filesDB <- liftM S.files get
+          filesDB <- liftM DB.files getDB
           files <- io $ query filesDB DB.GetFiles
           io $ mapM_ print files
     , comArgsNum = 0
@@ -224,7 +233,7 @@ putInFile = FileCommand {
 rmFile = FileCommand {
       fcomName = "rm"
     , fcomAction = \ f [] -> do
-        files <- liftM S.files get
+        files <- liftM DB.files getDB
         io $ update files (DB.DelFile f)
     , fcomUsage = "rm filename"
     , fcomPerms = F.W
@@ -248,7 +257,7 @@ timeLeft = Command {
       comName = "tl"
     , comAction = \ [] -> do
           currTime <- io timestamp
-          valTime <- liftM S.valTime get
+          valTime <- liftM S.valTime getST
           let tl = 60 - (currTime - valTime)
           io $ print tl
     , comArgsNum = 0
@@ -257,7 +266,7 @@ timeLeft = Command {
 
 replace :: F.File -> F.File -> Action ()
 replace file newfile = do
-    files <- liftM S.files get
+    files <- liftM DB.files getDB
     _ <- io $ update files (DB.DelFile file)
     io $ update files (DB.AddFile newfile)
 
@@ -276,7 +285,7 @@ timestamp = liftM utctDayTime getCurrentTime
 
 checkAuth :: Action Bool
 checkAuth = do
-    valTime <- liftM S.valTime get
+    valTime <- liftM S.valTime getST
     currTime <- io timestamp
     if currTime - valTime < 60
         then return True
@@ -287,7 +296,7 @@ checkAuth = do
 updateValTime :: Action ()
 updateValTime = do
     currTime <- io timestamp
-    state <- get
+    state <- getST
     put state {S.valTime = currTime}
 
 askQuestion :: Action (Bool)
@@ -319,11 +328,13 @@ run code = do
     currTime <- timestamp
     let initState = S.ST {
           S.currUser = U.guest
-        , S.users = users
-        , S.files = files
         , S.valTime = currTime
     }
-    _ <- finally (runStateT code initState) $ do
+    let db = DB.DB {
+          DB.users = users
+        , DB.files = files
+    }
+    _ <- finally (runStateT (runReaderT code db) initState) $ do
         closeAcidState users
         closeAcidState files
         close logHandler

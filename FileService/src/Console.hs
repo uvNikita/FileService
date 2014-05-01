@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  Console
@@ -33,7 +34,7 @@ import           Data.Acid (openLocalStateFrom, closeAcidState, query, update)
 import           Data.Maybe (fromMaybe)
 import           Data.Time.Clock (DiffTime, getCurrentTime, utctDayTime)
 import           Control.Exception (finally)
-import           Control.Applicative ((<$>))
+import           Control.Applicative ((<$>), (<*>))
 import           Control.Monad (when)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Reader (ReaderT, ask, runReaderT)
@@ -60,57 +61,83 @@ getST = lift get
 
 type Args = [String]
 
-class Executable a where
-    excName :: a -> String
-    excArgsNum :: a -> Int
-    excUsage :: a -> String
-    performAction :: a ->  Args -> Action ()
-    exc :: a -> Args -> Action ()
-    exc e args = if length args == excArgsNum e
-                    then performAction e args
-                    else raise $ "Usage: " ++ excUsage e
+--class Executable a where
+--    excName :: a -> String
+--    excArgsNum :: a -> Int
+--    excUsage :: a -> String
+--    performAction :: a ->  Args -> Action ()
+--    exc :: a -> Args -> Action ()
+--    exc e args = if length args == excArgsNum e
+--                    then performAction e args
+--                    else raise $ "Usage: " ++ excUsage e
 
-toMap :: Executable a => [a] -> Map.Map String a
-toMap cs = Map.fromList (map (\ c -> (excName c, c)) cs)
+toMap :: [Command] -> Map.Map String Command
+toMap = Map.fromList . map ((,) <$> (name . info) <*> id)
 
-data Command = Command {
-      comName :: String
-    , comAction :: Args -> Action ()
-    , comArgsNum :: Int
-    , comUsage :: String
+data CommandInfo = CommandInfo {
+      name :: String
+    , argsNum :: Int
+    , usage :: String
 }
 
-instance Executable Command where
-    excName = comName
-    excArgsNum = comArgsNum
-    excUsage = comUsage
-    performAction = comAction
+data Command = Command { info :: CommandInfo
+                       , action :: Args -> Action () }
+             | FileCommand { info :: CommandInfo
+                           , fileAction :: F.File -> Args -> Action ()
+                           , permissions :: F.Permissions}
 
-data FileCommand = FileCommand {
-      fcomName :: String
-    , fcomAction :: F.File -> Args -> Action ()
-    , fcomUsage :: String
-    , fcomArgsNum :: Int
-    , fcomPerms :: F.Permissions
-}
+exc :: Command -> Args -> Action ()
+exc com args =
+    if length args == argsNum (info com)
+      then performAction com args
+      else raise $ "Usage: " ++ usage (info com)
+    where
+        performAction (Command {}) args = action com args
+        performAction (FileCommand {fileAction, permissions}) (filename:args) = do
+            filesDB <- liftM DB.files getDB
+            file <- io $ query filesDB (DB.GetFile filename)
+            currUser <- liftM S.currUser getST
+            let canProcess f = hasPerms currUser f permissions
+            maybe (raise $ "No such file: " ++ filename)
+                  (\ f -> if canProcess f
+                             then fileAction f args
+                             else do
+                                io $ warningM logger $ "Permission Denied: " ++ name (info com)
+                                raise "Permission Denied.")
+                  (file)
+        performAction (FileCommand {}) [] = raise $ "Usage: " ++ usage (info com)
 
-instance Executable FileCommand where
-    excName = fcomName
-    excArgsNum c = fcomArgsNum c + 1
-    excUsage = fcomUsage
-    performAction c (filename:args) = do
-        filesDB <- liftM DB.files getDB
-        file <- io $ query filesDB (DB.GetFile filename)
-        currUser <- liftM S.currUser getST
-        let canProcess f = hasPerms currUser f (fcomPerms c)
-        maybe (raise $ "No such file: " ++ filename)
-              (\ f -> if canProcess f
-                         then fcomAction c f args
-                         else do
-                            io $ warningM logger $ "Permission Denied: " ++ excName c
-                            raise "Permission Denied.")
-              (file)
-    performAction c [] = raise $ "Usage: " ++ excUsage c
+--instance Executable Command where
+--    excName = comName
+--    excArgsNum = comArgsNum
+--    excUsage = comUsage
+--    performAction = comAction
+
+--data FileCommand = FileCommand {
+--      fcomName :: String
+--    , fcomAction :: F.File -> Args -> Action ()
+--    , fcomUsage :: String
+--    , fcomArgsNum :: Int
+--    , fcomPerms :: F.Permissions
+--}
+
+--instance Executable FileCommand where
+--    excName = fcomName
+--    excArgsNum c = fcomArgsNum c + 1
+--    excUsage = fcomUsage
+--    performAction c (filename:args) = do
+--        filesDB <- liftM DB.files getDB
+--        file <- io $ query filesDB (DB.GetFile filename)
+--        currUser <- liftM S.currUser getST
+--        let canProcess f = hasPerms currUser f (fcomPerms c)
+--        maybe (raise $ "No such file: " ++ filename)
+--              (\ f -> if canProcess f
+--                         then fcomAction c f args
+--                         else do
+--                            io $ warningM logger $ "Permission Denied: " ++ excName c
+--                            raise "Permission Denied.")
+--              (file)
+--    performAction c [] = raise $ "Usage: " ++ excUsage c
 
 hasPerms :: U.User -> F.File -> F.Permissions -> Bool
 hasPerms user file perms = F.fileowner file == user ||
@@ -123,14 +150,14 @@ io = liftIO
 commands :: Map String Command
 commands = toMap coms
            where coms = [login, printUser, addUser, addFile
-                       , listFiles, timeLeft, delUser]
-fcommands :: Map String FileCommand
-fcommands = toMap fcoms
-            where fcoms = [catFile, rmFile, putInFile, chMod]
-
+                       , listFiles, timeLeft, delUser, catFile
+                       , rmFile, putInFile, chMod]
+login :: Command
 login = Command {
-      comName = "login"
-    , comAction = \ [username, password] -> do
+      info = CommandInfo { name = "login"
+                         , argsNum = 2
+                         , usage = "login username password" }
+    , action = \ [username, password] -> do
           users <- liftM DB.users getDB
           maybeUser <- io $ query users (DB.GetUser username)
           let pass = B.pack password
@@ -142,14 +169,14 @@ login = Command {
               Just user -> if verifyPassword pass $ U.passHash user
                           then getST >>= (\ st -> put $ st {S.currUser = user})
                           else nonValid
-    , comArgsNum = 2
-    , comUsage = "login username password"
-
 }
 
+addUser :: Command
 addUser = Command {
-      comName = "adduser"
-    , comAction = \ [username, password] ->
+      info = CommandInfo { name = "adduser"
+                         , argsNum = 2
+                         , usage = "adduser username password" }
+    , action = \ [username, password] ->
           if not $ U.validPass password
               then raise "Not valid pass."
               else do
@@ -160,13 +187,14 @@ addUser = Command {
                    dbUser <- io $ query users (DB.GetUser username)
                    let addUser' = io $ update users (DB.AddUser user)
                    maybe addUser' (\ _ -> raise "User exists.") dbUser
-    , comArgsNum = 2
-    , comUsage = "adduser username password"
 }
 
+delUser :: Command
 delUser = Command {
-      comName = "deluser"
-    , comAction = \ [username] -> do
+      info = CommandInfo { name = "deluser"
+                         , argsNum = 1
+                         , usage = "deluser username" }
+    , action = \ [username] -> do
           currUser <- liftM S.currUser getST
           if currUser /= U.root
              then do
@@ -178,90 +206,96 @@ delUser = Command {
                 maybe (raise "No such user")
                       (io . update users . DB.DelUser)
                       (user)
-    , comArgsNum = 1
-    , comUsage = "deluser username"
 }
 
+printUser :: Command
 printUser = Command {
-      comName = "pu"
-    , comAction = \ [] -> getST >>= (io . putStrLn . U.username . S.currUser)
-    , comArgsNum = 0
-    , comUsage = "pu"
+      info = CommandInfo { name = "pu"
+                         , argsNum = 0
+                         , usage = "pu" }
+    , action = \ [] -> getST >>= (io . putStrLn . U.username . S.currUser)
 }
 
+addFile :: Command
 addFile = Command {
-      comName = "addfile"
-    , comAction = \ [fname, fdata] -> do
+      info = CommandInfo { name = "addfile"
+                         , argsNum = 2
+                         , usage = "addfile filename myfiledata" }
+    , action = \ [fname, fdata] -> do
           files <- liftM DB.files getDB
           owner <- liftM S.currUser getST
           dbFile <- io $ query files (DB.GetFile fname)
           let file = F.File fname owner fdata F.R
           let addFile' = io $ update files (DB.AddFile file)
           maybe addFile' (\ _ -> raise "File exists.") dbFile
-     , comArgsNum = 2
-     , comUsage = "addfile filename myfiledata"
 }
 
+listFiles :: Command
 listFiles = Command {
-      comName = "ls"
-    , comAction = \ [] -> do
+      info = CommandInfo { name = "ls"
+                         , argsNum = 0
+                         , usage = "ls" }
+    , action = \ [] -> do
           filesDB <- liftM DB.files getDB
           files <- io $ query filesDB DB.GetFiles
           io $ mapM_ print files
-    , comArgsNum = 0
-    , comUsage = "ls"
 }
 
+catFile :: Command
 catFile = FileCommand {
-      fcomName = "cat"
-    , fcomAction = \ f [] -> io $ putStrLn $ F.filedata f
-    , fcomUsage = "cat filename"
-    , fcomPerms = F.R
-    , fcomArgsNum = 0
+      info = CommandInfo { name = "cat"
+                         , argsNum = 1
+                         , usage = "cat filename" }
+    , fileAction = \ f [] -> io $ putStrLn $ F.filedata f
+    , permissions = F.R
 }
 
+putInFile :: Command
 putInFile = FileCommand {
-      fcomName = "put"
-    , fcomAction = \ f [fdata] -> do
+      info = CommandInfo { name = "put"
+                         , argsNum = 2
+                         , usage = "put filename \"new data\"" }
+    , fileAction = \ f [fdata] -> do
         let nf = f {F.filedata = fdata}
         replace f nf
-    , fcomUsage = "put filename \"new data\""
-    , fcomPerms = F.W
-    , fcomArgsNum = 1
+    , permissions = F.W
 }
 
+rmFile :: Command
 rmFile = FileCommand {
-      fcomName = "rm"
-    , fcomAction = \ f [] -> do
+      info = CommandInfo { name = "rm"
+                         , argsNum = 1
+                         , usage = "rm filename" }
+    , fileAction = \ f [] -> do
         files <- liftM DB.files getDB
         io $ update files (DB.DelFile f)
-    , fcomUsage = "rm filename"
-    , fcomPerms = F.W
-    , fcomArgsNum = 0
+    , permissions = F.W
 }
 
+chMod :: Command
 chMod = FileCommand {
-      fcomName = "chmod"
-    , fcomAction = \ f [perms] ->
+      info = CommandInfo { name = "chmod"
+                         , argsNum = 2
+                         , usage = "chmod filename r-" }
+    , fileAction = \ f [perms] ->
         case maybeRead perms of
             Nothing -> raise "Invalid permissions."
             Just ps -> do
                 let nf = f {F.fileperms = ps}
                 replace f nf
-    , fcomUsage = "chmod filename r-"
-    , fcomPerms = F.W
-    , fcomArgsNum = 1
+    , permissions = F.W
 }
 
+timeLeft :: Command
 timeLeft = Command {
-      comName = "tl"
-    , comAction = \ [] -> do
+      info = CommandInfo { name = "tl"
+                         , argsNum = 0
+                         , usage = "rl" }
+    , action = \ [] -> do
           currTime <- io timestamp
           valTime <- liftM S.valTime getST
           let tl = 60 - (currTime - valTime)
           io $ print tl
-    , comArgsNum = 0
-    , comUsage = "tl"
 }
 
 replace :: F.File -> F.File -> Action ()
@@ -271,16 +305,15 @@ replace file newfile = do
     io $ update files (DB.AddFile newfile)
 
 excCommand :: String -> [String] -> Action ()
-excCommand cName args = do
-    let noCommand = raise $ "No such command: " ++ cName
+excCommand cName args =
     case Map.lookup cName commands of
         Just c -> exc c args
-        Nothing -> maybe noCommand (`exc` args) (Map.lookup cName fcommands)
+        Nothing -> raise $ "No such command: " ++ cName
 
 raise :: String -> Action ()
 raise msg = io $ putStrLn msg
 
-timestamp :: IO (DiffTime)
+timestamp :: IO DiffTime
 timestamp = liftM utctDayTime getCurrentTime
 
 checkAuth :: Action Bool
@@ -299,7 +332,7 @@ updateValTime = do
     state <- getST
     put state {S.valTime = currTime}
 
-askQuestion :: Action (Bool)
+askQuestion :: Action Bool
 askQuestion = do
     x1 <- io $ randomRIO (1, 10)
     x2 <- io $ randomRIO (1, 10)

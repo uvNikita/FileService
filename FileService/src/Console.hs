@@ -38,7 +38,7 @@ import           Control.Applicative ((<$>), (<*>))
 import           Control.Monad (when)
 import           Control.Monad.Trans (lift)
 import           Control.Monad.Reader (ReaderT, ask, runReaderT)
-import           Control.Monad.State (StateT, runStateT, get, put, liftM, liftIO)
+import           Control.Monad.State (StateT, runStateT, get, put, liftIO)
 import           Crypto.PasswordStore (makePassword, verifyPassword)
 import           System.IO (Handle)
 import           System.Random (randomRIO)
@@ -59,17 +59,10 @@ getDB = ask
 getST :: Action S.ST
 getST = lift get
 
-type Args = [String]
+putST :: S.ST -> Action ()
+putST = lift . put
 
---class Executable a where
---    excName :: a -> String
---    excArgsNum :: a -> Int
---    excUsage :: a -> String
---    performAction :: a ->  Args -> Action ()
---    exc :: a -> Args -> Action ()
---    exc e args = if length args == excArgsNum e
---                    then performAction e args
---                    else raise $ "Usage: " ++ excUsage e
+type Args = [String]
 
 toMap :: [Command] -> Map.Map String Command
 toMap = Map.fromList . map ((,) <$> (name . info) <*> id)
@@ -94,9 +87,9 @@ exc com args =
     where
         performAction (Command {}) args = action com args
         performAction (FileCommand {fileAction, permissions}) (filename:args) = do
-            filesDB <- liftM DB.files getDB
+            filesDB <- DB.files <$> getDB
             file <- io $ query filesDB (DB.GetFile filename)
-            currUser <- liftM S.currUser getST
+            currUser <- S.currUser <$> getST
             let canProcess f = hasPerms currUser f permissions
             maybe (raise $ "No such file: " ++ filename)
                   (\ f -> if canProcess f
@@ -106,38 +99,6 @@ exc com args =
                                 raise "Permission Denied.")
                   (file)
         performAction (FileCommand {}) [] = raise $ "Usage: " ++ usage (info com)
-
---instance Executable Command where
---    excName = comName
---    excArgsNum = comArgsNum
---    excUsage = comUsage
---    performAction = comAction
-
---data FileCommand = FileCommand {
---      fcomName :: String
---    , fcomAction :: F.File -> Args -> Action ()
---    , fcomUsage :: String
---    , fcomArgsNum :: Int
---    , fcomPerms :: F.Permissions
---}
-
---instance Executable FileCommand where
---    excName = fcomName
---    excArgsNum c = fcomArgsNum c + 1
---    excUsage = fcomUsage
---    performAction c (filename:args) = do
---        filesDB <- liftM DB.files getDB
---        file <- io $ query filesDB (DB.GetFile filename)
---        currUser <- liftM S.currUser getST
---        let canProcess f = hasPerms currUser f (fcomPerms c)
---        maybe (raise $ "No such file: " ++ filename)
---              (\ f -> if canProcess f
---                         then fcomAction c f args
---                         else do
---                            io $ warningM logger $ "Permission Denied: " ++ excName c
---                            raise "Permission Denied.")
---              (file)
---    performAction c [] = raise $ "Usage: " ++ excUsage c
 
 hasPerms :: U.User -> F.File -> F.Permissions -> Bool
 hasPerms user file perms = F.fileowner file == user ||
@@ -158,7 +119,7 @@ login = Command {
                          , argsNum = 2
                          , usage = "login username password" }
     , action = \ [username, password] -> do
-          users <- liftM DB.users getDB
+          users <- DB.users <$> getDB
           maybeUser <- io $ query users (DB.GetUser username)
           let pass = B.pack password
           let nonValid = do
@@ -167,7 +128,7 @@ login = Command {
           case maybeUser of
               Nothing -> nonValid
               Just user -> if verifyPassword pass $ U.passHash user
-                          then getST >>= (\ st -> put $ st {S.currUser = user})
+                          then getST >>= (\ st -> putST $ st {S.currUser = user})
                           else nonValid
 }
 
@@ -180,7 +141,7 @@ addUser = Command {
           if not $ U.validPass password
               then raise "Not valid pass."
               else do
-                   users <- liftM DB.users getDB
+                   users <- DB.users <$> getDB
                    let pass = B.pack password
                    passHash <- io $ makePassword pass 14
                    let user = U.User username passHash
@@ -195,13 +156,13 @@ delUser = Command {
                          , argsNum = 1
                          , usage = "deluser username" }
     , action = \ [username] -> do
-          currUser <- liftM S.currUser getST
+          currUser <- S.currUser <$> getST
           if currUser /= U.root
              then do
                 raise "Only root can delete users."
                 io $ warningM logger "Non root tried to delete user."
              else do
-                users <- liftM DB.users getDB
+                users <- DB.users <$> getDB
                 user <- io $query users (DB.GetUser username)
                 maybe (raise "No such user")
                       (io . update users . DB.DelUser)
@@ -222,8 +183,8 @@ addFile = Command {
                          , argsNum = 2
                          , usage = "addfile filename myfiledata" }
     , action = \ [fname, fdata] -> do
-          files <- liftM DB.files getDB
-          owner <- liftM S.currUser getST
+          files <- DB.files <$> getDB
+          owner <- S.currUser <$> getST
           dbFile <- io $ query files (DB.GetFile fname)
           let file = F.File fname owner fdata F.R
           let addFile' = io $ update files (DB.AddFile file)
@@ -236,7 +197,7 @@ listFiles = Command {
                          , argsNum = 0
                          , usage = "ls" }
     , action = \ [] -> do
-          filesDB <- liftM DB.files getDB
+          filesDB <- DB.files <$> getDB
           files <- io $ query filesDB DB.GetFiles
           io $ mapM_ print files
 }
@@ -267,7 +228,7 @@ rmFile = FileCommand {
                          , argsNum = 1
                          , usage = "rm filename" }
     , fileAction = \ f [] -> do
-        files <- liftM DB.files getDB
+        files <- DB.files <$> getDB
         io $ update files (DB.DelFile f)
     , permissions = F.W
 }
@@ -293,14 +254,14 @@ timeLeft = Command {
                          , usage = "rl" }
     , action = \ [] -> do
           currTime <- io timestamp
-          valTime <- liftM S.valTime getST
+          valTime <- S.valTime <$> getST
           let tl = 60 - (currTime - valTime)
           io $ print tl
 }
 
 replace :: F.File -> F.File -> Action ()
 replace file newfile = do
-    files <- liftM DB.files getDB
+    files <- DB.files <$> getDB
     _ <- io $ update files (DB.DelFile file)
     io $ update files (DB.AddFile newfile)
 
@@ -314,11 +275,11 @@ raise :: String -> Action ()
 raise msg = io $ putStrLn msg
 
 timestamp :: IO DiffTime
-timestamp = liftM utctDayTime getCurrentTime
+timestamp = utctDayTime <$> getCurrentTime
 
 checkAuth :: Action Bool
 checkAuth = do
-    valTime <- liftM S.valTime getST
+    valTime <- S.valTime <$> getST
     currTime <- io timestamp
     if currTime - valTime < 60
         then return True
@@ -330,14 +291,14 @@ updateValTime :: Action ()
 updateValTime = do
     currTime <- io timestamp
     state <- getST
-    put state {S.valTime = currTime}
+    putST state {S.valTime = currTime}
 
 askQuestion :: Action Bool
 askQuestion = do
     x1 <- io $ randomRIO (1, 10)
     x2 <- io $ randomRIO (1, 10)
     io $ putStrLn $ show x1 ++ " + " ++ show x2 ++ " = "
-    res <- io $ liftM maybeRead getLine :: Action (Maybe Int)
+    res <- io $ maybeRead <$> getLine :: Action (Maybe Int)
     let maybeValid = (x1 + x2 ==) <$> res
     return $ fromMaybe False maybeValid
 

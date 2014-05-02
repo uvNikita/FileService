@@ -58,4 +58,5 @@ instance Ord Permissions where
     compare N N = EQ
     compare RW _ = GT
     compare _ N = LT
-    compare p1 p2 = if p1 == p2 then EQ else LT
+    compare p1 p2 | p1 == p2 = EQ
+                  | otherwise = LT

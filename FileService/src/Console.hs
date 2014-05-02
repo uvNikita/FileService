@@ -79,26 +79,29 @@ data Command = Command { info :: CommandInfo
                            , fileAction :: F.File -> Args -> Action ()
                            , permissions :: F.Permissions}
 
-exc :: Command -> Args -> Action ()
-exc com args =
-    if length args == argsNum (info com)
-      then performAction com args
-      else raise $ "Usage: " ++ usage (info com)
-    where
-        performAction (Command {}) args = action com args
-        performAction (FileCommand {fileAction, permissions}) (filename:args) = do
-            filesDB <- DB.files <$> getDB
-            file <- io $ query filesDB (DB.GetFile filename)
-            currUser <- S.currUser <$> getST
-            let canProcess f = hasPerms currUser f permissions
-            maybe (raise $ "No such file: " ++ filename)
-                  (\ f -> if canProcess f
-                             then fileAction f args
-                             else do
-                                io $ warningM logger $ "Permission Denied: " ++ name (info com)
-                                raise "Permission Denied.")
-                  (file)
-        performAction (FileCommand {}) [] = raise $ "Usage: " ++ usage (info com)
+showUsage :: Command -> Action ()
+showUsage = raise . ("Usage: " ++) . usage . info
+
+exc :: Command -> Args ->  Action ()
+exc com@(Command {}) args
+    | length args < argsNum (info com) = showUsage com
+    | otherwise = action com args
+
+exc com@(FileCommand {}) [] = showUsage com
+exc com@(FileCommand {fileAction, permissions}) (filename:args)
+    | length args + 1 < argsNum (info com) = showUsage com
+    | otherwise = do
+        filesDB <- DB.files <$> getDB
+        file <- io $ query filesDB (DB.GetFile filename)
+        currUser <- S.currUser <$> getST
+        let canProcess f = hasPerms currUser f permissions
+        maybe (raise $ "No such file: " ++ filename)
+              (\ f -> if canProcess f
+                         then fileAction f args
+                         else do
+                            io $ warningM logger $ "Permission Denied: " ++ name (info com)
+                            raise "Permission Denied.")
+              (file)
 
 hasPerms :: U.User -> F.File -> F.Permissions -> Bool
 hasPerms user file perms = F.fileowner file == user ||

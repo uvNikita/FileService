@@ -31,9 +31,10 @@ loop = do
         Nothing -> io $ putStrLn ""
         Just "exit" -> return ()
         Just line -> do
-            let (cName, args) = parseCommand line
             io $ addHistory line
-            excCommand cName args
+            case parseCommand line of
+                Left err -> raise $ show err
+                Right (comName, args) -> excCommand comName args
             loop
 
 main :: IO ()

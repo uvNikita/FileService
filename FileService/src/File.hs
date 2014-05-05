@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell #-}
 -----------------------------------------------------------------------------
 --
 -- Module      :  File
@@ -21,22 +22,7 @@ module File (
 
 import Data.Typeable (Typeable)
 import User (User, username)
-
-
-data File = File {
-      filename :: String
-    , fileowner :: User
-    , filedata :: String
-    , fileperms :: Permissions
-} deriving (Typeable)
-
-instance Eq File where
-    f1 == f2 = filename f1 == filename f2
-
-instance Show File where
-    show f = filename f ++ "\t" ++
-             show (fileperms f) ++ "\t" ++
-             username (fileowner f)
+import Data.SafeCopy (deriveSafeCopy, base)
 
 data Permissions = N | R | W | RW deriving (Eq)
 
@@ -60,3 +46,23 @@ instance Ord Permissions where
     compare _ N = LT
     compare p1 p2 | p1 == p2 = EQ
                   | otherwise = LT
+
+$(deriveSafeCopy 0 'base ''Permissions)
+
+
+data File = File {
+      filename :: String
+    , fileowner :: User
+    , filedata :: String
+    , fileperms :: Permissions
+} deriving (Typeable)
+
+instance Eq File where
+    f1 == f2 = filename f1 == filename f2
+
+instance Show File where
+    show f = filename f ++ "\t" ++
+             show (fileperms f) ++ "\t" ++
+             username (fileowner f)
+
+$(deriveSafeCopy 0 'base ''File)

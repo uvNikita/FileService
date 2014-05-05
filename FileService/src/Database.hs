@@ -32,7 +32,7 @@ module Database (
 
 
 import qualified File as F
-import           File (File, Permissions)
+import           File (File)
 import qualified User as U
 import           User (User)
 import qualified Data.Map as M
@@ -48,7 +48,6 @@ data Files = Files [File]
 
 data Users = Users (Map String User)
 
-$(deriveSafeCopy 0 'base ''User)
 $(deriveSafeCopy 0 'base ''Users)
 
 addUser :: User -> Update Users ()
@@ -71,8 +70,6 @@ $(makeAcidic ''Users ['addUser, 'getUser, 'delUser])
 
 type DBUsers = AcidState Users
 
-$(deriveSafeCopy 0 'base ''Permissions)
-$(deriveSafeCopy 0 'base ''File)
 $(deriveSafeCopy 0 'base ''Files)
 
 addFile :: File -> Update Files ()

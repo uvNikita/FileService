@@ -4,4 +4,12 @@ cabal-dev
 *.hi
 *.chi
 *.chs.h
-.virthualenv
+.virtualenv
+.hsenv
+.cabal-sandbox/
+cabal.sandbox.config
+cabal.config
+*.lkshf
+*.lkshw
+*.lkshs
+*.swp
